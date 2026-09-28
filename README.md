@@ -74,7 +74,3 @@ DEEPL_API_KEY=your_deepl_api_key
 ```bash
 npm start
 ```
-
-### Windows dependency install troubleshooting
-
-If `npm install discord.js` fails while rebuilding `better-sqlite3`, the failure is from the native SQLite module, not Discord.js. Run `npm ci` from the project directory to install the complete, lockfile-pinned dependency set. Avoid installing a single dependency into this project; `discord.js` is already declared in `package.json`. If you must build native modules from source instead of using the published prebuilt binary, install Visual Studio Build Tools with the **Desktop development with C++** workload and Python supported by `node-gyp`.
