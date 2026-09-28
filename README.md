@@ -56,13 +56,12 @@ VoxBridge is available under the [MIT License](LICENSE). You may use, modify, an
 
 1. **Clone the repository:**
 ```bash
-
-   git clone https://github.com/DevArqf/VoxBridge
-   cd VoxBridge
+git clone https://github.com/DevArqf/VoxBridge
+cd VoxBridge
 ```
 2. **Install dependencies:**
 ```bash
-   npm ci
+npm ci
 ```
 3. **Configure environment variables:**
 Create a `.env` file in the root directory based on `.env.example`:
