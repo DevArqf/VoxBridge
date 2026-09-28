@@ -1,0 +1,14 @@
+services:
+  voxbridge:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DB_PATH: /data/app.db
+    volumes:
+      - voxbridge-data:/data
+
+volumes:
+  voxbridge-data:
