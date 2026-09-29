@@ -11,6 +11,7 @@ const loadEvents = require('./functions/handleEvents');
 const logger = require('./utils/logger');
 const config = require('./config');
 const { closeDatabase, initializeDatabase } = require('./db');
+const { startWebhookServer, stopWebhookServer } = require('./stripe/webhookServer');
 
 const client = new Client({
   intents: [
@@ -28,6 +29,7 @@ client.on('shardError', (error, shardId) => logger.error({ err: error, shardId }
 async function start() {
   logger.info(`Debug logging is ${logger.enabled ? 'enabled' : 'disabled'}.`);
   initializeDatabase();
+  startWebhookServer();
   const commandFolders = fs.readdirSync(path.join(__dirname, 'commands'))
     .filter((name) => fs.statSync(path.join(__dirname, 'commands', name)).isDirectory());
   const eventFiles = fs.readdirSync(path.join(__dirname, 'events'))
@@ -39,7 +41,11 @@ async function start() {
 
 start().catch((error) => {
   logger.error('VoxBridge startup failed.', error);
-  process.exitCode = 1;
+  stopWebhookServer().catch((shutdownError) => logger.warn({ err: shutdownError }, 'Stripe listener shutdown after startup failure failed.'))
+    .finally(() => {
+      closeDatabase();
+      process.exitCode = 1;
+    });
 });
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -47,7 +53,10 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     logger.info({ signal }, 'Shutting down VoxBridge.');
     if (client.vpbActivityTimer) clearInterval(client.vpbActivityTimer);
     client.destroy();
-    closeDatabase();
-    process.exit(0);
+    stopWebhookServer().catch((error) => logger.warn({ err: error }, 'Stripe listener shutdown failed.'))
+      .finally(() => {
+        closeDatabase();
+        process.exit(0);
+      });
   });
 }

@@ -62,6 +62,7 @@ class GuildAudioQueue {
     this.playing = false;
     this.emptyTimer = null;
     this.generation = 0;
+    this.sequence = 0;
     this.player = createAudioPlayer();
 
     this.player.on(AudioPlayerStatus.Idle, () => {
@@ -79,7 +80,7 @@ class GuildAudioQueue {
     this.connection?.subscribe(this.player);
   }
 
-  async enqueueText(text, language, { preferredVoice, defaultVoice, onError } = {}) {
+  async enqueueText(text, language, { preferredVoice, defaultVoice, onError, priority = false } = {}) {
     const chunks = splitText(text);
     if (this.items.length + chunks.length > MAX_PENDING_CHUNKS) {
       throw new AppError('QUEUE_FULL', 'The voice queue is busy. Please try again shortly.');
@@ -100,13 +101,19 @@ class GuildAudioQueue {
       audioBuffers.push(audio);
     }
 
-    this.items.push(...audioBuffers.map((audio) => ({ audio, onError })));
+    const queued = audioBuffers.map((audio) => ({ audio, onError, priority: Boolean(priority), sequence: this.sequence++ }));
+    for (const item of queued) {
+      const index = this.items.findIndex((existing) => Number(existing.priority) < Number(item.priority));
+      if (index < 0) this.items.push(item);
+      else this.items.splice(index, 0, item);
+    }
     logger.debug({
       addedChunks: audioBuffers.length,
       pendingChunks: this.items.length,
       voice: selectedVoice.ShortName,
       preferredVoice: preferredVoice || null,
       serverDefaultVoice: defaultVoice || null,
+      priority,
     }, 'Audio added to queue.');
     this.playNext();
   }

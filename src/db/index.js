@@ -266,6 +266,118 @@ function getMonthlyTranslationUsage(guildId, month = currentUsageMonth()) {
     `).get(guildId, month)?.character_count || 0);
 }
 
+function editCustomSlang(guildId, originalTerm, nextOriginalTerm, nextReplacementTerm) {
+  const original = sanitizeText(originalTerm, { maxLength: 100 });
+  const nextOriginal = sanitizeText(nextOriginalTerm, { maxLength: 100 });
+  const replacement = sanitizeText(nextReplacementTerm, { maxLength: 200 });
+  if (!isSnowflake(guildId) || !original || !nextOriginal || !replacement) {
+    throw new AppError('INVALID_INPUT', 'Slang terms must be valid and within their character limits.');
+  }
+  return withDatabaseError('edit custom slang', () => {
+    const result = database().prepare(`
+      UPDATE custom_slang SET original_term = ?, replacement_term = ?
+      WHERE guild_id = ? AND lower(original_term) = lower(?)
+    `).run(nextOriginal, replacement, guildId, original);
+    const rows = database().prepare('SELECT original_term, replacement_term FROM custom_slang WHERE guild_id = ? ORDER BY id').all(guildId);
+    cache.setCachedCustomSlang(guildId, rows);
+    return result.changes;
+  });
+}
+
+const FREE_MONTHLY_CHARACTER_LIMIT = 50_000;
+const PRO_MONTHLY_CHARACTER_LIMIT = 1_000_000;
+
+function getGuildUsage(guildId, month = currentUsageMonth()) {
+  const used = getMonthlyTranslationUsage(guildId, month);
+  const subscription = withDatabaseError('read guild subscription', () => database().prepare(
+    'SELECT status, current_period_end, is_pro FROM guild_subscriptions WHERE guild_id = ?',
+  ).get(guildId));
+  const active = Boolean(subscription?.is_pro) && ['active', 'trialing'].includes(subscription?.status)
+    && (!subscription.current_period_end || Date.parse(subscription.current_period_end) > Date.now());
+  const limit = active ? PRO_MONTHLY_CHARACTER_LIMIT : FREE_MONTHLY_CHARACTER_LIMIT;
+  return { guildId, month, tier: active ? 'pro' : 'free', used, limit, remaining: Math.max(0, limit - used) };
+}
+
+function reserveTranslationUsage(guildId, characterCount, month = currentUsageMonth()) {
+  if (!isSnowflake(guildId) || !Number.isInteger(characterCount) || characterCount < 1) {
+    throw new AppError('INVALID_INPUT', 'Invalid usage reservation.');
+  }
+  return withDatabaseError('reserve monthly translation usage', () => database().transaction(() => {
+    const usage = getGuildUsage(guildId, month);
+    if (characterCount > usage.remaining) return { ...usage, allowed: false };
+    recordTranslationUsage(guildId, characterCount, month);
+    return { ...usage, used: usage.used + characterCount, remaining: usage.remaining - characterCount, allowed: true };
+  })());
+}
+
+function releaseTranslationUsage(guildId, characterCount, month = currentUsageMonth()) {
+  if (!isSnowflake(guildId) || !Number.isInteger(characterCount) || characterCount < 1) return;
+  return withDatabaseError('release monthly translation usage', () => database().prepare(`
+    UPDATE translation_usage SET character_count = MAX(0, character_count - ?), updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = ? AND month = ?
+  `).run(characterCount, guildId, month));
+}
+
+function getGuildSubscription(guildId) {
+  return withDatabaseError('read guild subscription', () => database().prepare(
+    'SELECT * FROM guild_subscriptions WHERE guild_id = ?',
+  ).get(guildId) || null);
+}
+
+function upsertGuildSubscription(subscription) {
+  const { guildId, customerId, subscriptionId, priceId, status, currentPeriodEnd, cancelAtPeriodEnd, eventCreated } = subscription;
+  if (!isSnowflake(guildId) || typeof status !== 'string' || status.length > 40) {
+    throw new AppError('INVALID_INPUT', 'Invalid subscription update.');
+  }
+  return withDatabaseError('update guild subscription', () => database().prepare(`
+    INSERT INTO guild_subscriptions
+      (guild_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, current_period_end, cancel_at_period_end, last_event_created, is_pro)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      stripe_customer_id = COALESCE(excluded.stripe_customer_id, guild_subscriptions.stripe_customer_id),
+      stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, guild_subscriptions.stripe_subscription_id),
+      stripe_price_id = COALESCE(excluded.stripe_price_id, guild_subscriptions.stripe_price_id),
+      status = excluded.status,
+      current_period_end = excluded.current_period_end,
+      cancel_at_period_end = excluded.cancel_at_period_end,
+      is_pro = excluded.is_pro,
+      last_event_created = COALESCE(excluded.last_event_created, guild_subscriptions.last_event_created),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE excluded.last_event_created IS NULL OR guild_subscriptions.last_event_created IS NULL
+      OR excluded.last_event_created >= guild_subscriptions.last_event_created
+  `).run(guildId, customerId || null, subscriptionId || null, priceId || null, status,
+    currentPeriodEnd || null, cancelAtPeriodEnd ? 1 : 0, Number.isInteger(eventCreated) ? eventCreated : null,
+    ['active', 'trialing'].includes(status) ? 1 : 0));
+}
+
+function getGuildSubscriptionByStripeSubscriptionId(subscriptionId) {
+  if (typeof subscriptionId !== 'string' || !subscriptionId.startsWith('sub_')) return null;
+  return withDatabaseError('find subscription owner', () => database().prepare(
+    'SELECT * FROM guild_subscriptions WHERE stripe_subscription_id = ?',
+  ).get(subscriptionId) || null);
+}
+
+function claimUsageAlert(guildId, month, threshold) {
+  if (!isSnowflake(guildId) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || ![80, 100].includes(threshold)) {
+    throw new AppError('INVALID_INPUT', 'Invalid usage alert key.');
+  }
+  return withDatabaseError('claim usage threshold alert', () => database().prepare(`
+    INSERT OR IGNORE INTO usage_alerts (guild_id, month, threshold) VALUES (?, ?, ?)
+  `).run(guildId, month, threshold).changes > 0);
+}
+
+function recordStripeEvent(eventId, eventType) {
+  return withDatabaseError('record Stripe webhook event', () => database().prepare(
+    'INSERT OR IGNORE INTO stripe_webhook_events (event_id, event_type) VALUES (?, ?)',
+  ).run(eventId, eventType).changes > 0);
+}
+
+function listMutedUsers(guildId) {
+  return withDatabaseError('list muted users', () => database().prepare(
+    'SELECT user_id, muted_by, created_at FROM guild_muted_users WHERE guild_id = ? ORDER BY created_at DESC',
+  ).all(guildId));
+}
+
 function muteUser(guildId, userId, moderatorId) {
   if (![guildId, userId, moderatorId].every(isSnowflake)) {
     throw new AppError('INVALID_INPUT', 'A valid guild, user, and moderator are required.');
@@ -299,6 +411,7 @@ function isUserMuted(guildId, userId) {
 }
 
 module.exports = {
+  database,
   initializeDatabase,
   closeDatabase,
   getGuildSettings,
@@ -312,9 +425,19 @@ module.exports = {
   setGuildDefaultVoice,
   getCustomSlang,
   addCustomSlang,
+  editCustomSlang,
   removeCustomSlang,
   recordTranslationUsage,
   getMonthlyTranslationUsage,
+  getGuildUsage,
+  reserveTranslationUsage,
+  releaseTranslationUsage,
+  getGuildSubscription,
+  getGuildSubscriptionByStripeSubscriptionId,
+  upsertGuildSubscription,
+  claimUsageAlert,
+  recordStripeEvent,
+  listMutedUsers,
   currentUsageMonth,
   muteUser,
   unmuteUser,

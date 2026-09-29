@@ -7,6 +7,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const proxyCommand = require('../src/commands/Other/proxy');
 const translateCommand = require('../src/commands/Other/translate');
+const usageCommand = require('../src/commands/Other/usage');
+const settingsCommand = require('../src/commands/Other/settings');
+const upgradeCommand = require('../src/commands/Other/upgrade');
 
 test('/proxy includes configuration, personal voice, and slang subcommands', () => {
   const command = proxyCommand.data.toJSON();
@@ -25,4 +28,9 @@ test('/translate provides text, target language, and optional privacy settings',
   assert.equal(command.name, 'translate');
   assert.deepEqual(command.options.map((option) => option.name), ['text', 'target_lang', 'private']);
   assert.equal(command.options[2].required, false);
+});
+
+test('Discord-native management commands are available without OAuth dashboard routes', () => {
+  assert.deepEqual([usageCommand.data.name, settingsCommand.data.name, upgradeCommand.data.name], ['usage', 'settings', 'upgrade']);
+  assert.equal(typeof settingsCommand.onComponent, 'function');
 });

@@ -2,7 +2,7 @@ const {
   MessageFlags,
   SlashCommandBuilder,
 } = require('discord.js');
-const { getUserProfile, recordTranslationUsage } = require('../../db');
+const { getUserProfile, reserveTranslationUsage, releaseTranslationUsage } = require('../../db');
 const logger = require('../../utils/logger');
 const { panel } = require('../../utils/ui');
 const { translate, translationCharacterCount } = require('../../utils/translator');
@@ -47,13 +47,20 @@ module.exports = {
       flags: MessageFlags.IsComponentsV2 | (isPrivate ? MessageFlags.Ephemeral : 0),
     });
     const profile = getUserProfile(interaction.user.id);
-    const translated = await translate(text, profile?.native_language, [], targetLanguage);
+    let reservation;
     if (interaction.guildId) {
-      try {
-        recordTranslationUsage(interaction.guildId, translationCharacterCount(text));
-      } catch (error) {
-        logger.warn({ guildId: interaction.guildId, err: error }, 'Could not record slash translation usage.');
+      reservation = reserveTranslationUsage(interaction.guildId, translationCharacterCount(text));
+      if (!reservation.allowed) {
+        await interaction.editReply(panel('Monthly limit reached', `This server has used ${reservation.used.toLocaleString()} of ${reservation.limit.toLocaleString()} characters on the ${reservation.tier} tier. A server admin can run **/upgrade** to unlock Pro.`, { tone: 'warning', ephemeral: isPrivate }));
+        return;
       }
+    }
+    let translated;
+    try {
+      translated = await translate(text, profile?.native_language, [], targetLanguage);
+    } catch (error) {
+      if (reservation?.allowed) releaseTranslationUsage(interaction.guildId, translationCharacterCount(text), reservation.month);
+      throw error;
     }
 
     const targetName = languageChoices.find((choice) => choice.value === targetLanguage)?.name || targetLanguage;

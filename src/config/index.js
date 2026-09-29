@@ -18,11 +18,26 @@ const schema = z.object({
   TARGET_VOICE_LANG: z.string()
     .trim()
     .transform((value) => value.toUpperCase())
-    .refine((value) => TARGET_LANGUAGE_CODES.has(value), 'Unsupported target language code.'),
+    .refine((value) => TARGET_LANGUAGE_CODES.has(value), 'Unsupported target language code.')
+    .default('EN'),
   DB_PATH: z.string().trim().min(1).default('./app.db'),
   DISCORD_GUILD_ID: z.union([z.string().trim().regex(/^\d{17,20}$/), z.literal('')]).optional().transform((value) => value || undefined),
   DEBUG: booleanFromEnv.optional().default(false),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  WEBSITE_PORT: z.coerce.number().int().min(1).max(65535).default(9909),
+  PUBLIC_BASE_URL: z.string().url().default('https://cadia.online')
+    .transform((value) => value.replace(/\/+$/, ''))
+    .refine((value) => {
+      const url = new URL(value);
+      return (url.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(url.hostname))
+        && url.pathname === '/' && !url.search && !url.hash;
+    }, 'PUBLIC_BASE_URL must be a public HTTPS origin (or localhost for development), without a path or port suffix.'),
+  STRIPE_SECRET_KEY: z.string().default(''),
+  STRIPE_WEBHOOK_SECRET: z.string().default(''),
+  STRIPE_PAYMENT_LINK_URL: z.string().trim().default('').refine((value) => {
+    if (!value) return true;
+    try { return new URL(value).hostname === 'buy.stripe.com' && value.startsWith('https://'); } catch { return false; }
+  }, 'STRIPE_PAYMENT_LINK_URL must be a Stripe Payment Link URL.'),
 });
 
 const parsed = schema.safeParse(process.env);

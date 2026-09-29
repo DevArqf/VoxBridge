@@ -7,6 +7,9 @@ services:
     environment:
       NODE_ENV: production
       DB_PATH: /data/app.db
+      WEBSITE_PORT: 9909
+    ports:
+      - "9909:9909"
     volumes:
       - voxbridge-data:/data
 

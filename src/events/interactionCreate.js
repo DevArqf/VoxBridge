@@ -16,7 +16,20 @@ module.exports = {
       }
       return;
     }
-    if (!interaction.isChatInputCommand()) return;
+    if (!interaction.isChatInputCommand()) {
+      if (interaction.customId?.startsWith('vb_settings:')) {
+        try {
+          await client.commands.get('settings')?.onComponent?.(interaction);
+        } catch (error) {
+          logger.error({ err: error, guildId: interaction.guildId, userId: interaction.user?.id }, 'Settings interaction failed.');
+          const message = userFacingMessage(error, 'Could not save that setting. Reopen /settings and try again.');
+          const response = panel('Settings not saved', message, { ephemeral: true });
+          if (interaction.deferred || interaction.replied) await interaction.followUp(response).catch(() => {});
+          else await interaction.reply(response).catch(() => {});
+        }
+      }
+      return;
+    }
     const command = client.commands.get(interaction.commandName);
     if (!command) return;
     logger.debug({

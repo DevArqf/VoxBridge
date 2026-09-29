@@ -36,6 +36,29 @@ test('migrations, persistence, and cache updates work', (t) => {
   database.recordTranslationUsage(guildId, 5, '2026-08');
   assert.equal(database.getMonthlyTranslationUsage(guildId, '2026-09'), 20);
   assert.equal(database.getMonthlyTranslationUsage(guildId, '2026-07'), 0);
+  const freeLimit = database.getGuildUsage(guildId, '2026-09');
+  assert.equal(freeLimit.limit, 50_000);
+  assert.equal(database.reserveTranslationUsage(guildId, 49_980, '2026-09').allowed, true);
+  assert.equal(database.reserveTranslationUsage(guildId, 1, '2026-09').allowed, false);
+  database.releaseTranslationUsage(guildId, 49_980, '2026-09');
+  database.upsertGuildSubscription({
+    guildId,
+    customerId: 'cus_test',
+    subscriptionId: 'sub_test',
+    priceId: 'price_pro',
+    status: 'active',
+    currentPeriodEnd: '2099-12-31T00:00:00.000Z',
+    cancelAtPeriodEnd: false,
+    eventCreated: 2_000,
+  });
+  assert.equal(database.getGuildUsage(guildId, '2026-09').limit, 1_000_000);
+  assert.equal(database.getGuildSubscription(guildId).is_pro, 1);
+  database.upsertGuildSubscription({ guildId, status: 'past_due', eventCreated: 2_001 });
+  assert.equal(database.getGuildUsage(guildId, '2026-09').limit, 50_000);
+  database.upsertGuildSubscription({ guildId, customerId: 'cus_test', subscriptionId: 'sub_test', priceId: 'price_pro', status: 'active', currentPeriodEnd: '2099-12-31T00:00:00.000Z', cancelAtPeriodEnd: false, eventCreated: 2_002 });
+  assert.equal(database.getGuildSubscriptionByStripeSubscriptionId('sub_test').guild_id, guildId);
+  assert.equal(database.claimUsageAlert(guildId, '2026-09', 80), true);
+  assert.equal(database.claimUsageAlert(guildId, '2026-09', 80), false);
   assert.equal(database.muteUser(guildId, userId, '123456789012345682'), true);
   assert.equal(database.isUserMuted(guildId, userId), true);
   assert.equal(database.muteUser(guildId, userId, '123456789012345682'), false);
