@@ -69,32 +69,3 @@ npm ci
 npm run deploy-commands
 npm start
 ```
-
-Configure the server directly in Discord with `/settings`. No website, Discord OAuth2, browser session, or web dashboard is required. The small HTTP listener exists only for Stripe's signed webhook and listens on `WEBSITE_PORT` (default `9909`).
-
-### Optional Stripe subscriptions
-
-Create a recurring USD $4.99/month subscription Payment Link in Stripe. Add its URL and your API/webhook secrets to `.env`:
-
-```env
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_PAYMENT_LINK_URL=https://buy.stripe.com/your_payment_link
-```
-
-Create a Stripe webhook endpoint at `https://cadia.online/stripe/webhook` and subscribe it to `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`. Set `PUBLIC_BASE_URL=https://cadia.online`; configure your reverse proxy to route only the webhook host/path to `WEBSITE_PORT`. `/upgrade` creates an ephemeral link button and appends the current Discord guild ID as Stripe's `client_reference_id`. Checkout completion links the Stripe subscription to that guild; later subscription events keep it in sync. Webhook signatures are verified against the raw request body and duplicate event IDs are ignored. Test with Stripe test-mode keys before switching to live mode.
-
-Free servers have a hard monthly limit of 50,000 translated characters; Pro subscriptions raise it to 1,000,000. Pro audio chunks are prioritized ahead of pending free-tier chunks in the guild voice queue. Limits reset by UTC calendar month.
-
-### Webhook port and legal pages
-
-Set the Wispbyte allocation port to `9909` and `WEBSITE_PORT=9909`. Configure the reverse proxy to send Stripe POST requests for `/stripe/webhook` to that port. The Express process does not serve a landing page or dashboard. Update `[operator contact]` and governing-law placeholders in `Terms & Policy/TERMS_OF_SERVICE.md` and `Terms & Policy/PRIVACY_POLICY.md` before public launch.
-
-## Discord-native commands
-
-- `/settings` — administrator-only interactive menus and modals for proxy channels, default language, server TTS voice, custom slang, and muted users.
-- `/usage` — private monthly character usage, tier, queue priority, and UTC reset date.
-- `/upgrade` — administrator-only ephemeral Stripe Payment Link for the current guild.
-- Existing `/proxy` and `/translate` commands remain available.
-
-Free servers receive one channel notice when usage reaches 80%. At the cap, VoxBridge stops the over-limit translation and privately messages the sender with upgrade guidance (with a channel reply fallback if DMs are closed). Discord does not allow ephemeral responses to ordinary chat messages; slash-command responses remain ephemeral.
